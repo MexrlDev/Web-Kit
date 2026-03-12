@@ -6,14 +6,19 @@
   <title>main</title>
   <style>
     html,body { height:100%; margin:0; background:#000; font-family: Arial, Helvetica, sans-serif; }
-    #screen { position: relative; width:1920px; height:1080px; margin: 0 auto; overflow: hidden; background: #000; image-rendering: pixelated; }
+    #viewport { width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    #screen { position: relative; width:1920px; height:1080px; overflow: hidden; background: #000; image-rendering: pixelated; transform-origin: center center; }
     .ui-img, .ui-text { position:absolute; transform-origin:left top; will-change: transform, opacity, left, top; pointer-events: none; }
     .ui-text { display:flex; align-items:center; justify-content:center; font-weight:600; text-shadow: 0 1px 0 rgba(0,0,0,0.8); pointer-events:none; color:white; }
     .button-border { box-sizing:border-box; }
+    .rgb-glow { position:absolute; z-index:1; border-radius:8px; filter: blur(8px) saturate(1.5); pointer-events:none; opacity:0.95; background: conic-gradient(#ff0000,#ff8800,#ffee00,#88ff00,#00ffee,#0000ff,#8800ff,#ff0088,#ff0000); mask: radial-gradient(circle, transparent 60%, black 61%); -webkit-mask: radial-gradient(circle, transparent 60%, black 61%); animation: spin 3000ms linear infinite; transform-origin:center; display:none; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="screen" aria-hidden="false"></div>
+  <div id="viewport">
+    <div id="screen" aria-hidden="false"></div>
+  </div>
   <script>
   (function () {
     'use strict';
@@ -39,6 +44,10 @@
     window.jsmaf = { root: { children: [] }, setInterval: function (fn,t){return window.setInterval(fn,t);}, clearInterval: function(id){window.clearInterval(id);}, onKeyDown: null };
     var screen = document.getElementById('screen');
     function createImageNode(obj) {
+      var wrapperGlow = document.createElement('div');
+      wrapperGlow.className = 'rgb-glow';
+      wrapperGlow.style.display = 'none';
+      screen.appendChild(wrapperGlow);
       var img = document.createElement('img');
       img.className = 'ui-img';
       img.style.position = 'absolute';
@@ -46,6 +55,10 @@
       img.style.pointerEvents = 'none';
       if (obj.url) img.src = obj.url;
       updateNodeFromObj(img, obj);
+      img._glow = wrapperGlow;
+      screen.appendChild(img);
+      img.style.zIndex = 2;
+      wrapperGlow.style.zIndex = 1;
       return img;
     }
     function createTextNode(obj) {
@@ -55,6 +68,8 @@
       div.style.pointerEvents = 'none';
       updateNodeFromObj(div, obj);
       if (obj.text) div.textContent = obj.text;
+      div.style.zIndex = 3;
+      screen.appendChild(div);
       return div;
     }
     function updateNodeFromObj(node, obj) {
@@ -77,10 +92,25 @@
       } else {
         node.style.border = 'none';
       }
+      if (node._glow) {
+        var glow = node._glow;
+        var gx = x - 8;
+        var gy = y - 8;
+        var gw = (w * sx) + 16;
+        var gh = (h * sy) + 16;
+        glow.style.left = gx + 'px';
+        glow.style.top = gy + 'px';
+        glow.style.width = gw + 'px';
+        glow.style.height = gh + 'px';
+        var br = Math.max(6, Math.min(24, Math.round(Math.min(gw, gh) * 0.06)));
+        glow.style.borderRadius = br + 'px';
+        glow.style.display = (obj.__glowVisible) ? 'block' : 'none';
+        glow.style.opacity = (obj._glowOpacity !== undefined) ? obj._glowOpacity : 0.95;
+      }
     }
     window.Image = function (opts) {
       opts = opts || {};
-      var obj = { url: opts.url || '', x: opts.x || 0, y: opts.y || 0, width: opts.width || (opts.url ? 100 : 0), height: opts.height || (opts.url ? 100 : 0), visible: (typeof opts.visible === 'boolean') ? opts.visible : true, scaleX:1, scaleY:1, alpha:1, borderColor: opts.borderColor || 'transparent', borderWidth: opts.borderWidth || 0 };
+      var obj = { url: opts.url || '', x: opts.x || 0, y: opts.y || 0, width: opts.width || (opts.url ? 100 : 0), height: opts.height || (opts.url ? 100 : 0), visible: (typeof opts.visible === 'boolean') ? opts.visible : true, scaleX:1, scaleY:1, alpha:1, borderColor: opts.borderColor || 'transparent', borderWidth: opts.borderWidth || 0, __glowVisible:false };
       var node = createImageNode(obj);
       obj._node = node;
       Object.defineProperty(obj, 'url', { get:function(){return node.src;}, set:function(v){ node.src = v; } });
@@ -94,6 +124,7 @@
       Object.defineProperty(obj, 'alpha', { get:function(){return parseFloat(node.style.opacity)||1;}, set:function(v){ node.style.opacity = v; } });
       Object.defineProperty(obj, 'borderColor', { get:function(){return node.style.borderColor||'transparent';}, set:function(v){ node.style.borderColor = v; updateNodeFromObj(node,obj); } });
       Object.defineProperty(obj, 'borderWidth', { get:function(){return parseFloat(node.style.borderWidth)||0;}, set:function(v){ node.style.borderWidth = v; updateNodeFromObj(node,obj); } });
+      Object.defineProperty(obj, '__glowVisible', { get:function(){return obj.__glowVisibleFlag||false;}, set:function(v){ obj.__glowVisibleFlag = v; obj._node._glowVisible = v; updateNodeFromObj(node,obj); } });
       screen.appendChild(node);
       return obj;
     };
@@ -112,10 +143,11 @@
     };
     function Style(opts){ window.__styles__ = window.__styles__ || {}; window.__styles__[opts.name] = opts; }
     function updateScale() {
-      var w = 1920, h = 1080;
-      var maxW = Math.min(window.innerWidth - 32, 1920);
-      var scale = Math.min(maxW / w, (window.innerHeight - 32) / h);
-      screen.style.transform = 'scale(' + scale + ',' + scale + ')';
+      var designW = 1920, designH = 1080;
+      var availableW = window.innerWidth;
+      var availableH = window.innerHeight;
+      var scale = Math.min(availableW / designW, availableH / designH);
+      screen.style.transform = 'scale(' + scale + ')';
     }
     window.addEventListener('resize', updateScale);
     updateScale();
@@ -267,6 +299,7 @@
         prevButtonObj.alpha = 0.7;
         prevButtonObj.borderColor = 'transparent';
         prevButtonObj.borderWidth = 0;
+        if (prevButtonObj._node && prevButtonObj._node._glow) { prevButtonObj.__glowVisible = false; prevButtonObj._node._glow.style.display = 'none'; }
         buttonMarker.visible = false;
         animateZoomOut(prevButtonObj, buttonTexts[prevButton], buttonOrigPos[prevButton].x, buttonOrigPos[prevButton].y, textOrigPos[prevButton].x, textOrigPos[prevButton].y);
       }
@@ -282,6 +315,7 @@
           _button.alpha = 1.0;
           _button.borderColor = 'rgb(100,180,255)';
           _button.borderWidth = 3;
+          if (_button._node && _button._node._glow) { _button.__glowVisible = true; _button._node._glow.style.display = 'block'; }
           _buttonMarker.visible = true;
           animateZoomIn(_button, buttonText, buttonOrigPos_.x, buttonOrigPos_.y, textOrigPos_.x, textOrigPos_.y);
         } else if (_i !== prevButton) {
@@ -297,6 +331,7 @@
           buttonText.scaleY = 1.0;
           buttonText.x = textOrigPos_.x;
           buttonText.y = textOrigPos_.y;
+          if (_button._node && _button._node._glow) { _button.__glowVisible = false; _button._node._glow.style.display = 'none'; }
           _buttonMarker.visible = false;
         }
       }
