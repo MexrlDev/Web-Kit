@@ -10,7 +10,6 @@
     #screen { position: relative; width:1920px; height:1080px; overflow: hidden; background: #000; image-rendering: pixelated; transform-origin: center center; }
     .ui-img, .ui-text { position:absolute; transform-origin:left top; will-change: transform, opacity, left, top; pointer-events: none; }
     .ui-text { display:flex; align-items:center; justify-content:center; font-weight:600; text-shadow: 0 1px 0 rgba(0,0,0,0.8); pointer-events:none; color:white; }
-    .button-border { box-sizing:border-box; }
     .rgb-glow { position:absolute; z-index:1; border-radius:8px; filter: blur(8px) saturate(1.5); pointer-events:none; opacity:0.95; background: conic-gradient(#ff0000,#ff8800,#ffee00,#88ff00,#00ffee,#0000ff,#8800ff,#ff0088,#ff0000); mask: radial-gradient(circle, transparent 60%, black 61%); -webkit-mask: radial-gradient(circle, transparent 60%, black 61%); animation: spin 3000ms linear infinite; transform-origin:center; display:none; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   </style>
@@ -41,7 +40,7 @@
         return true;
       });
     }
-    window.jsmaf = { root: { children: [] }, setInterval: function (fn,t){return window.setInterval(fn,t);}, clearInterval: function(id){window.clearInterval(id);}, onKeyDown: null };
+    window.jsmaf = { root: { children: [] }, setInterval: function (fn,t){return window.setInterval(fn,t);}, clearInterval: function(id){window.clearInterval(id);}, onKeyDown: null, setTimeout: window.setTimeout, circleIsAdvanceButton: false, XMLHttpRequest: window.XMLHttpRequest };
     var screen = document.getElementById('screen');
     function createImageNode(obj) {
       var wrapperGlow = document.createElement('div');
@@ -165,7 +164,7 @@
     var useImageText = false;
     var textImageBase = baseImg + 'text_';
     function startBgmIfEnabled(){}
-    include('languages.js').catch(function(){ window.lang = { loadingMainMenu:'Loading main menu...', jailbreak:'Jailbreak', payloadMenu:'Payloads', config:'Config', exit:'Exit', mainMenuLoaded:'Main menu loaded' }; });
+    include('languages.html').catch(function(){ window.lang = { loadingMainMenu:'Loading main menu...', jailbreak:'Jailbreak', payloadMenu:'Payloads', config:'Config', exit:'Exit', mainMenuLoaded:'Main menu loaded' }; });
     log((window.lang && window.lang.loadingMainMenu) || 'Loading main menu...');
     var currentButton = 0;
     var buttons = [];
@@ -186,7 +185,11 @@
     var logoHeight = 338;
     var logo = new Image({ url: baseImg + 'logo.png', x: centerX - logoWidth / 2, y: 50, width: logoWidth, height: logoHeight });
     jsmaf.root.children.push(logo);
-    var menuOptions = [{ label: (window.lang && window.lang.jailbreak) || 'Jailbreak', script: 'loader.js', imgKey: 'jailbreak' }, { label: (window.lang && window.lang.payloadMenu) || 'Payloads', script: 'payload_host.js', imgKey: 'payloadMenu' }, { label: (window.lang && window.lang.config) || 'Config', script: 'config_ui.js', imgKey: 'config' }];
+    var menuOptions = [
+      { label: (window.lang && window.lang.jailbreak) || 'Jailbreak', script: 'jailbreak.html', imgKey: 'jailbreak' },
+      { label: (window.lang && window.lang.payloadMenu) || 'Payloads', script: 'payload_host.html', imgKey: 'payloadMenu' },
+      { label: (window.lang && window.lang.config) || 'Config', script: 'config_ui.html', imgKey: 'config' }
+    ];
     var startY = 450;
     var buttonSpacing = 120;
     var buttonWidth = 400;
@@ -337,23 +340,35 @@
       }
       prevButton = currentButton;
     }
+    function closeApp() {
+      jsmaf.onKeyDown = null;
+      try {
+        window.open('','_self');
+        window.close();
+      } catch (e) {}
+      setTimeout(function () {
+        try {
+          window.location.href = 'about:blank';
+        } catch (e) {}
+        try {
+          document.documentElement.innerHTML = '';
+        } catch (e) {}
+      }, 200);
+    }
     function handleButtonPress() {
       if (currentButton === buttons.length - 1) {
-        include('includes/kill_vue.js');
+        include('includes/kill_vue.html').catch(function(){});
+        closeApp();
       } else if (currentButton < menuOptions.length) {
         var selectedOption = menuOptions[currentButton];
         if (!selectedOption) return;
-        if (selectedOption.script === 'loader.js') { jsmaf.onKeyDown = function () {}; }
-        log('Loading ' + selectedOption.script + '...');
+        if (selectedOption.script && (selectedOption.script.indexOf('loader') !== -1 || selectedOption.script.indexOf('jailbreak') !== -1)) jsmaf.onKeyDown = function () {};
         try {
-          if (selectedOption.script.includes('loader.js')) {
-            include(selectedOption.script);
-          } else {
-            include('themes/' + (typeof CONFIG !== 'undefined' && CONFIG.theme ? CONFIG.theme : 'default') + '/' + selectedOption.script);
-          }
+          include(selectedOption.script);
         } catch (e) {
-          log('ERROR loading ' + selectedOption.script + ': ' + e.message);
-          if (e.stack) log(e.stack);
+          try {
+            include('themes/' + (typeof CONFIG !== 'undefined' && CONFIG.theme ? CONFIG.theme : 'default') + '/' + selectedOption.script);
+          } catch (err) { log('ERROR loading ' + selectedOption.script + ': ' + err.message); }
         }
       }
     }
