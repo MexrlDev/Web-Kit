@@ -1,0 +1,370 @@
+(function(){
+'use strict';
+if (typeof lang === 'undefined') lang = { loadingConfig: 'Loading config...', autoLapse: 'Auto Lapse', autoPoop: 'Auto Poop', autoClose: 'Auto Close', music: 'Music', jbBehavior: 'JB Behavior', theme: 'Theme', jbBehaviorAuto: 'Auto', jbBehaviorNetctrl: 'Netctrl', jbBehaviorLapse: 'Lapse', configLoaded: 'Config loaded' };
+log(lang.loadingConfig);
+var fs = {
+  write: function(filename, content, callback){
+    try {
+      localStorage.setItem('config.' + filename, content);
+      if (callback) callback(null);
+    } catch(e){
+      if (callback) callback(new Error('failed'));
+    }
+  },
+  read: function(filename, callback){
+    try {
+      var v = localStorage.getItem('config.' + filename);
+      if (v !== null) {
+        if (callback) callback(null, v);
+        return;
+      }
+      fetch('./' + filename).then(function(r){
+        if (!r.ok) {
+          if (callback) callback(new Error('failed'), null);
+          return;
+        }
+        return r.text();
+      }).then(function(text){
+        if (text === undefined) return;
+        if (callback) callback(null, text);
+      }).catch(function(){
+        if (callback) callback(new Error('failed'), null);
+      });
+    } catch(e){
+      if (callback) callback(new Error('failed'), null);
+    }
+  }
+};
+var currentConfig = { autolapse:false, autopoop:false, autoclose:false, autoclose_delay:0, music:true, jb_behavior:0, theme:'default' };
+var userPayloads = [];
+var configLoaded = false;
+var jbBehaviorLabels = [lang.jbBehaviorAuto || 'Auto', lang.jbBehaviorNetctrl || 'Netctrl', lang.jbBehaviorLapse || 'Lapse'];
+var jbBehaviorImgKeys = ['jbBehaviorAuto', 'jbBehaviorNetctrl', 'jbBehaviorLapse'];
+function scanThemes(){
+  var themes = [];
+  try {
+    var stored = localStorage.getItem('themes.list');
+    if (stored) {
+      var parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) themes = parsed.slice();
+    }
+  } catch(e){}
+  if (themes.length === 0) themes = ['default'];
+  var idx = themes.indexOf('default');
+  if (idx > 0) { themes.splice(idx,1); themes.unshift('default'); } else if (idx < 0) { themes.unshift('default'); }
+  return themes;
+}
+var availableThemes = scanThemes();
+log('Discovered themes: ' + availableThemes.join(', '));
+var themeLabels = availableThemes.map(function(theme){ return theme.charAt(0).toUpperCase() + theme.slice(1); });
+var themeImgKeys = availableThemes.map(function(theme){ return 'theme' + theme.charAt(0).toUpperCase() + theme.slice(1); });
+var currentButton = 0;
+var buttons = [];
+var buttonTexts = [];
+var buttonMarkers = [];
+var buttonOrigPos = [];
+var textOrigPos = [];
+var valueTexts = [];
+var normalButtonImg = './img/button_over_9.png';
+var selectedButtonImg = './img/button_over_9.png';
+jsmaf.root.children.length = 0;
+new Style({ name:'white', color:'white', size:24 });
+new Style({ name:'title', color:'white', size:32 });
+var background = new Image({ url: './img/multiview_bg_VAF.png', x:0, y:0, width:1920, height:1080 });
+jsmaf.root.children.push(background);
+var logo = new Image({ url: './img/logo.png', x:1620, y:0, width:300, height:169 });
+jsmaf.root.children.push(logo);
+if (typeof useImageText !== 'undefined' && useImageText) {
+  var titleImg = new Image({ url: './img/text_config.png', x:860, y:100, width:200, height:60 });
+  jsmaf.root.children.push(titleImg);
+} else {
+  var _title = new jsmaf.Text();
+  _title.text = lang.config || 'Config';
+  _title.x = 910;
+  _title.y = 120;
+  _title.style = 'title';
+  jsmaf.root.children.push(_title);
+}
+var configOptions = [
+  { key:'autolapse', label:lang.autoLapse || 'Auto Lapse', imgKey:'autoLapse', type:'toggle' },
+  { key:'autopoop', label:lang.autoPoop || 'Auto Poop', imgKey:'autoPoop', type:'toggle' },
+  { key:'autoclose', label:lang.autoClose || 'Auto Close', imgKey:'autoClose', type:'toggle' },
+  { key:'music', label:lang.music || 'Music', imgKey:'music', type:'toggle' },
+  { key:'jb_behavior', label:lang.jbBehavior || 'JB Behavior', imgKey:'jbBehavior', type:'cycle' },
+  { key:'theme', label:lang.theme || 'Theme', imgKey:'theme', type:'cycle' }
+];
+var centerX = 960;
+var startY = 200;
+var buttonSpacing = 120;
+var buttonWidth = 400;
+var buttonHeight = 80;
+for (var i=0;i<configOptions.length;i++){
+  var configOption = configOptions[i];
+  var btnX = centerX - buttonWidth/2;
+  var btnY = startY + i*buttonSpacing;
+  var button = new Image({ url: normalButtonImg, x: btnX, y: btnY, width: buttonWidth, height: buttonHeight });
+  buttons.push(button);
+  jsmaf.root.children.push(button);
+  buttonMarkers.push(null);
+  var btnText;
+  if (typeof useImageText !== 'undefined' && useImageText) {
+    btnText = new Image({ url: './img/text_' + configOption.imgKey + '.png', x: btnX + 20, y: btnY + 15, width:200, height:50 });
+  } else {
+    btnText = new jsmaf.Text();
+    btnText.text = configOption.label;
+    btnText.x = btnX + 30;
+    btnText.y = btnY + 28;
+    btnText.style = 'white';
+  }
+  buttonTexts.push(btnText);
+  jsmaf.root.children.push(btnText);
+  if (configOption.type === 'toggle') {
+    var checkUrl = currentConfig[configOption.key] ? './img/check_small_on.png' : './img/check_small_off.png';
+    var checkmark = new Image({ url: checkUrl, x: btnX + 320, y: btnY + 20, width:40, height:40 });
+    valueTexts.push(checkmark);
+    jsmaf.root.children.push(checkmark);
+  } else {
+    var valueLabel;
+    if (configOption.key === 'jb_behavior') {
+      if (typeof useImageText !== 'undefined' && useImageText) {
+        valueLabel = new Image({ url: './img/text_' + jbBehaviorImgKeys[currentConfig.jb_behavior] + '.png', x: btnX + 230, y: btnY + 15, width:150, height:50 });
+      } else {
+        valueLabel = new jsmaf.Text();
+        valueLabel.text = jbBehaviorLabels[currentConfig.jb_behavior] || jbBehaviorLabels[0];
+        valueLabel.x = btnX + 250;
+        valueLabel.y = btnY + 28;
+        valueLabel.style = 'white';
+      }
+    } else if (configOption.key === 'theme') {
+      var themeIndex = availableThemes.indexOf(currentConfig.theme);
+      var displayIndex = themeIndex >= 0 ? themeIndex : 0;
+      if (typeof useImageText !== 'undefined' && useImageText) {
+        valueLabel = new Image({ url: './img/text_' + themeImgKeys[displayIndex] + '.png', x: btnX + 230, y: btnY + 15, width:150, height:50 });
+      } else {
+        valueLabel = new jsmaf.Text();
+        valueLabel.text = themeLabels[displayIndex] || themeLabels[0];
+        valueLabel.x = btnX + 250;
+        valueLabel.y = btnY + 28;
+        valueLabel.style = 'white';
+      }
+    }
+    valueTexts.push(valueLabel);
+    jsmaf.root.children.push(valueLabel);
+  }
+  buttonOrigPos.push({ x: btnX, y: btnY });
+  textOrigPos.push({ x: btnText.x, y: btnText.y });
+}
+var backHint = new jsmaf.Text();
+backHint.text = jsmaf.circleIsAdvanceButton ? 'X to go back' : 'O to go back';
+backHint.x = centerX - 60;
+backHint.y = startY + configOptions.length * buttonSpacing + 120;
+backHint.style = 'white';
+jsmaf.root.children.push(backHint);
+var zoomInInterval = null;
+var zoomOutInterval = null;
+var prevButton = -1;
+function easeInOut(t){ return (1 - Math.cos(t * Math.PI)) / 2; }
+function animateZoomIn(btn, text, btnOrigX, btnOrigY, textOrigX, textOrigY){
+  if (zoomInInterval) jsmaf.clearInterval(zoomInInterval);
+  var btnW = buttonWidth;
+  var btnH = buttonHeight;
+  var startScale = btn.scaleX || 1.0;
+  var endScale = 1.1;
+  var duration = 175;
+  var elapsed = 0;
+  var step = 16;
+  zoomInInterval = jsmaf.setInterval(function(){
+    elapsed += step;
+    var t = Math.min(elapsed / duration, 1);
+    var eased = easeInOut(t);
+    var scale = startScale + (endScale - startScale) * eased;
+    btn.scaleX = scale;
+    btn.scaleY = scale;
+    btn.x = btnOrigX - btnW * (scale - 1) / 2;
+    btn.y = btnOrigY - btnH * (scale - 1) / 2;
+    text.scaleX = scale;
+    text.scaleY = scale;
+    text.x = textOrigX - btnW * (scale - 1) / 2;
+    text.y = textOrigY - btnH * (scale - 1) / 2;
+    if (t >= 1) { jsmaf.clearInterval(zoomInInterval); zoomInInterval = null; }
+  }, step);
+}
+function animateZoomOut(btn, text, btnOrigX, btnOrigY, textOrigX, textOrigY){
+  if (zoomOutInterval) jsmaf.clearInterval(zoomOutInterval);
+  var btnW = buttonWidth;
+  var btnH = buttonHeight;
+  var startScale = btn.scaleX || 1.1;
+  var endScale = 1.0;
+  var duration = 175;
+  var elapsed = 0;
+  var step = 16;
+  zoomOutInterval = jsmaf.setInterval(function(){
+    elapsed += step;
+    var t = Math.min(elapsed / duration, 1);
+    var eased = easeInOut(t);
+    var scale = startScale + (endScale - startScale) * eased;
+    btn.scaleX = scale;
+    btn.scaleY = scale;
+    btn.x = btnOrigX - btnW * (scale - 1) / 2;
+    btn.y = btnOrigY - btnH * (scale - 1) / 2;
+    text.scaleX = scale;
+    text.scaleY = scale;
+    text.x = textOrigX - btnW * (scale - 1) / 2;
+    text.y = textOrigY - btnH * (scale - 1) / 2;
+    if (t >= 1) { jsmaf.clearInterval(zoomOutInterval); zoomOutInterval = null; }
+  }, step);
+}
+function updateHighlight(){
+  var prevButtonObj = buttons[prevButton];
+  var buttonMarker = buttonMarkers[prevButton];
+  if (prevButton >= 0 && prevButton !== currentButton && prevButtonObj){
+    prevButtonObj.url = normalButtonImg;
+    prevButtonObj.alpha = 0.7;
+    prevButtonObj.borderColor = 'transparent';
+    prevButtonObj.borderWidth = 0;
+    if (buttonMarker) buttonMarker.visible = false;
+    animateZoomOut(prevButtonObj, buttonTexts[prevButton], buttonOrigPos[prevButton].x, buttonOrigPos[prevButton].y, textOrigPos[prevButton].x, textOrigPos[prevButton].y);
+  }
+  for (var _i2=0;_i2<buttons.length;_i2++){
+    var _button = buttons[_i2];
+    var _buttonMarker = buttonMarkers[_i2];
+    var buttonText = buttonTexts[_i2];
+    var buttonOrigPos_ = buttonOrigPos[_i2];
+    var textOrigPos_ = textOrigPos[_i2];
+    if (_button === undefined || buttonText === undefined || buttonOrigPos_ === undefined || textOrigPos_ === undefined) continue;
+    if (_i2 === currentButton){
+      _button.url = selectedButtonImg;
+      _button.alpha = 1.0;
+      _button.borderColor = 'rgb(100,180,255)';
+      _button.borderWidth = 3;
+      if (_buttonMarker) _buttonMarker.visible = true;
+      animateZoomIn(_button, buttonText, buttonOrigPos_.x, buttonOrigPos_.y, textOrigPos_.x, textOrigPos_.y);
+    } else if (_i2 !== prevButton){
+      _button.url = normalButtonImg;
+      _button.alpha = 0.7;
+      _button.borderColor = 'transparent';
+      _button.borderWidth = 0;
+      _button.scaleX = 1.0;
+      _button.scaleY = 1.0;
+      _button.x = buttonOrigPos_.x;
+      _button.y = buttonOrigPos_.y;
+      buttonText.scaleX = 1.0;
+      buttonText.scaleY = 1.0;
+      buttonText.x = textOrigPos_.x;
+      buttonText.y = textOrigPos_.y;
+      if (_buttonMarker) _buttonMarker.visible = false;
+    }
+  }
+  prevButton = currentButton;
+}
+function updateValueText(index){
+  var options = configOptions[index];
+  var valueText = valueTexts[index];
+  if (!options || !valueText) return;
+  var key = options.key;
+  if (options.type === 'toggle'){
+    var value = currentConfig[key];
+    valueText.url = value ? './img/check_small_on.png' : './img/check_small_off.png';
+  } else {
+    if (key === 'jb_behavior'){
+      if (typeof useImageText !== 'undefined' && useImageText) {
+        valueText.url = './img/text_' + jbBehaviorImgKeys[currentConfig.jb_behavior] + '.png';
+      } else {
+        valueText.text = jbBehaviorLabels[currentConfig.jb_behavior] || jbBehaviorLabels[0];
+      }
+    } else if (key === 'theme'){
+      var themeIndex = availableThemes.indexOf(currentConfig.theme);
+      var displayIndex = themeIndex >= 0 ? themeIndex : 0;
+      if (typeof useImageText !== 'undefined' && useImageText) {
+        valueText.url = './img/text_' + themeImgKeys[displayIndex] + '.png';
+      } else {
+        valueText.text = themeLabels[displayIndex] || themeLabels[0];
+      }
+    }
+  }
+}
+function saveConfig(){
+  if (!configLoaded) return;
+  var configData = { config: { autolapse: currentConfig.autolapse, autopoop: currentConfig.autopoop, autoclose: currentConfig.autoclose, autoclose_delay: currentConfig.autoclose_delay, music: currentConfig.music, jb_behavior: currentConfig.jb_behavior, theme: currentConfig.theme }, payloads: userPayloads };
+  var configContent = JSON.stringify(configData, null, 2);
+  fs.write('config.json', configContent, function(err){
+    if (err) log('ERROR: Failed to save config: ' + err.message);
+    else log('Config saved successfully');
+  });
+}
+function loadConfig(){
+  fs.read('config.json', function(err,data){
+    if (err) {
+      configLoaded = true;
+      return;
+    }
+    try {
+      var configData = JSON.parse(data || '{}');
+      if (configData.config){
+        var _CONFIG = configData.config;
+        currentConfig.autolapse = _CONFIG.autolapse || false;
+        currentConfig.autopoop = _CONFIG.autopoop || false;
+        currentConfig.autoclose = _CONFIG.autoclose || false;
+        currentConfig.autoclose_delay = _CONFIG.autoclose_delay || 0;
+        currentConfig.music = _CONFIG.music !== false;
+        currentConfig.jb_behavior = _CONFIG.jb_behavior || 0;
+        if (_CONFIG.theme && availableThemes.indexOf(_CONFIG.theme) >= 0) currentConfig.theme = _CONFIG.theme;
+        else currentConfig.theme = availableThemes[0] || 'default';
+        if (configData.payloads && Array.isArray(configData.payloads)) userPayloads = configData.payloads.slice();
+        for (var _i3=0;_i3<configOptions.length;_i3++) updateValueText(_i3);
+        if (currentConfig.music) { if (typeof startBgmIfEnabled === 'function') startBgmIfEnabled(); } else { if (typeof stopBgm === 'function') stopBgm(); }
+        configLoaded = true;
+        log('Config loaded successfully');
+      }
+    } catch(e){
+      configLoaded = true;
+    }
+  });
+}
+function handleButtonPress(){
+  if (currentButton < configOptions.length){
+    var option = configOptions[currentButton];
+    var key = option.key;
+    if (option.type === 'cycle'){
+      if (key === 'jb_behavior'){
+        currentConfig.jb_behavior = (currentConfig.jb_behavior + 1) % jbBehaviorLabels.length;
+      } else if (key === 'theme'){
+        var themeIndex = availableThemes.indexOf(currentConfig.theme);
+        var displayIndex = themeIndex >= 0 ? themeIndex : 0;
+        var nextIndex = (displayIndex + 1) % availableThemes.length;
+        currentConfig.theme = availableThemes[nextIndex];
+      }
+    } else {
+      var boolKey = key;
+      currentConfig[boolKey] = !currentConfig[boolKey];
+      if (boolKey === 'music'){
+        if (typeof CONFIG !== 'undefined') CONFIG.music = currentConfig.music;
+        if (currentConfig.music) { if (typeof startBgmIfEnabled === 'function') startBgmIfEnabled(); } else { if (typeof stopBgm === 'function') stopBgm(); }
+      }
+      if (key === 'autolapse' && currentConfig.autolapse === true){
+        currentConfig.autopoop = false;
+        for (var _i4=0;_i4<configOptions.length;_i4++) if (configOptions[_i4].key === 'autopoop') { updateValueText(_i4); break; }
+      } else if (key === 'autopoop' && currentConfig.autopoop === true){
+        currentConfig.autolapse = false;
+        for (var _i5=0;_i5<configOptions.length;_i5++) if (configOptions[_i5].key === 'autolapse') { updateValueText(_i5); break; }
+      }
+    }
+    updateValueText(currentButton);
+    saveConfig();
+  }
+}
+var confirmKey = jsmaf.circleIsAdvanceButton ? 13 : 14;
+var backKey = jsmaf.circleIsAdvanceButton ? 14 : 13;
+jsmaf.onKeyDown = function(keyCode){
+  if (keyCode === 6 || keyCode === 5){ currentButton = (currentButton + 1) % buttons.length; updateHighlight(); }
+  else if (keyCode === 4 || keyCode === 7){ currentButton = (currentButton - 1 + buttons.length) % buttons.length; updateHighlight(); }
+  else if (keyCode === confirmKey) handleButtonPress();
+  else if (keyCode === backKey){
+    saveConfig();
+    if (typeof debugging !== 'undefined' && typeof debugging.restart === 'function') jsmaf.setTimeout(function(){ debugging.restart(); },100);
+  }
+};
+updateHighlight();
+loadConfig();
+log(lang.configLoaded || 'Config loaded');
+})();
